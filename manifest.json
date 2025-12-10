@@ -1,0 +1,45 @@
+{
+    "manifest_version": 2,
+    "name": "R2SAE - React2Shell Auto-Exploit",
+    "version": "1.0.0",
+    "description": "A security testing tool to detect and exploit prototype pollution in React Server Actions",
+    "author": "oscarmine",
+    "homepage_url": "https://github.com/oscarmine/R2SAE",
+    "icons": {
+        "48": "icons/icon-48.png",
+        "96": "icons/icon-96.png"
+    },
+    "browser_action": {
+        "default_icon": {
+            "48": "icons/icon-48.png",
+            "96": "icons/icon-96.png"
+        },
+        "default_title": "R2SAE - React2Shell",
+        "default_popup": "popup.html"
+    },
+    "permissions": [
+        "<all_urls>",
+        "storage",
+        "clipboardWrite",
+        "activeTab",
+        "tabs",
+        "webRequest",
+        "webRequestBlocking"
+    ],
+    "background": {
+        "scripts": [
+            "background.js"
+        ]
+    },
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "{23305534-4d28-496c-97ce-a8c5a65282a2}",
+            "strict_min_version": "140.0",
+            "data_collection_permissions": {
+                "required": [
+                    "none"
+                ]
+            }
+        }
+    }
+}
