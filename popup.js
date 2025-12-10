@@ -250,18 +250,16 @@ async function sendExploit(targetUrl, payload) {
 // ============================================
 // Scan Functions (via background script)
 // ============================================
-async function scanHost(url, method = 'passive') {
+async function scanHost(url) {
     try {
         const result = await browser.runtime.sendMessage({
             type: 'scan',
             url: url,
-            method: method,
             timeout: state.settings.timeout
         });
 
         return {
             vulnerable: result.vulnerable || false,
-            method: method,
             output: result.output || null,
             error: result.error,
             scanCommand: result.scanCommand
@@ -269,7 +267,6 @@ async function scanHost(url, method = 'passive') {
     } catch (e) {
         return {
             vulnerable: false,
-            method: method,
             output: null,
             error: e.message
         };
@@ -332,7 +329,7 @@ function escapeHtml(text) {
 // ============================================
 // History Management
 // ============================================
-function addToHistory(url, vulnerable, method) {
+function addToHistory(url, vulnerable) {
     if (!state.settings.saveHistory) return;
 
     // Remove duplicate if exists
@@ -342,7 +339,6 @@ function addToHistory(url, vulnerable, method) {
     state.history.unshift({
         url,
         vulnerable,
-        method,
         timestamp: Date.now()
     });
 
@@ -598,20 +594,19 @@ async function handleScan() {
             state.results.push({
                 url,
                 vulnerable: result.vulnerable,
-                method: result.method,
                 output: result.output
             });
 
             if (result.vulnerable) {
-                log(`VULNERABLE (${result.method})`, 'success');
+                log('VULNERABLE', 'error');
                 if (result.output) {
                     log(`Output: ${result.output}`, 'output');
                 }
             } else {
-                log('NOT VULNERABLE', 'error');
+                log('NOT VULNERABLE', 'success');
             }
 
-            addToHistory(url, result.vulnerable, result.method);
+            addToHistory(url, result.vulnerable);
 
         } catch (error) {
             log(`Error scanning ${url}: ${error.message}`, 'error');
