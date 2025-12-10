@@ -86,16 +86,6 @@
 
             <!-- Scan Tab Content -->
             <div class="tab-content active" id="scanContent">
-                <div class="scan-options">
-                    <label class="toggle-label">
-                        <span>Scan Method:</span>
-                        <div class="toggle-group">
-                            <button class="toggle-btn active" data-method="passive">Passive</button>
-                            <button class="toggle-btn" data-method="active">Active</button>
-                        </div>
-                    </label>
-                    <span class="method-hint" id="methodHint">Expression evaluation (safe)</span>
-                </div>
                 <button class="action-btn primary" id="scanBtn">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="11" cy="11" r="8" />
@@ -128,15 +118,6 @@
                     <textarea id="bulkUrls"
                         placeholder="https://example1.com&#10;https://example2.com&#10;https://example3.com"
                         rows="6"></textarea>
-                </div>
-                <div class="scan-options">
-                    <label class="toggle-label">
-                        <span>Scan Type:</span>
-                        <div class="toggle-group">
-                            <button class="toggle-btn active" data-bulk-method="passive">Passive</button>
-                            <button class="toggle-btn" data-bulk-method="active">Active</button>
-                        </div>
-                    </label>
                 </div>
                 <button class="action-btn primary" id="bulkScanBtn">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

@@ -35,8 +35,7 @@ The vulnerability exists in how Next.js handles multipart form data in Server Ac
 ## ✨ Features
 
 ### 🔍 Scanning
-- **Passive Scan**: Safe detection without executing code on target
-- **Active Scan**: Confirms vulnerability by executing harmless test command
+- **Vulnerability Detection**: Confirms RCE by executing harmless test command
 - **Auto-detect**: Automatically detects current tab's URL as target
 
 ### ⚡ Execution
@@ -46,7 +45,7 @@ The vulnerability exists in how Next.js handles multipart form data in Server Ac
 
 ### 📋 Bulk Scanning
 - **Multi-URL Support**: Scan hundreds of URLs at once
-- **Parallel Processing**: 5 concurrent scans for faster results
+- **Sequential Processing**: Reliable one-by-one scanning
 - **Visual Results**: Color-coded vulnerable (red) vs safe (green) indicators
 
 ### 🖥️ Interactive Shell
@@ -82,16 +81,8 @@ The vulnerability exists in how Next.js handles multipart form data in Server Ac
 
 ### Quick Start
 1. Click the R2SAE icon in your Firefox toolbar
-2. Navigate to a target website (or enter URL manually)
-3. Select **Passive** or **Active** scan mode
-4. Click **Scan** to check for vulnerability
-
-### Scanning Modes
-
-| Mode | Description | Risk Level |
-|------|-------------|------------|
-| **Passive** | Checks for vulnerability indicators without code execution | Safe |
-| **Active** | Executes `echo` command to confirm RCE | Low (harmless) |
+2. Navigate to a target website (URL auto-detected)
+3. Click **Start Scan** to check for vulnerability
 
 ### Command Execution
 1. Switch to the **Execute** tab
@@ -102,8 +93,7 @@ The vulnerability exists in how Next.js handles multipart form data in Server Ac
 ### Bulk Scanning
 1. Switch to the **Bulk** tab
 2. Paste URLs (one per line) - just domain names work too!
-3. Select scan type (Passive/Active)
-4. Click **Scan All** - results appear in real-time
+3. Click **Scan All** - results appear in real-time
 
 ---
 

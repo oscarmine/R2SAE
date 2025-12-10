@@ -8,8 +8,6 @@
 // ============================================
 const state = {
     mode: 'scan', // 'scan' | 'exec' | 'bulk' | 'shell'
-    scanMethod: 'passive', // 'passive' | 'active'
-    bulkMethod: 'passive', // 'passive' | 'active'
     shellConnected: false,
     history: [],
     results: [],
@@ -40,15 +38,10 @@ const elements = {
     connectBtn: document.getElementById('connectBtn'),
     sendBtn: document.getElementById('sendBtn'),
 
-    // Toggle buttons (scan method)
-    toggleBtns: document.querySelectorAll('.toggle-btn'),
-    methodHint: document.getElementById('methodHint'),
-
     // Bulk Scan
     bulkUrls: document.getElementById('bulkUrls'),
     bulkScanBtn: document.getElementById('bulkScanBtn'),
     bulkResults: document.getElementById('bulkResults'),
-    bulkMethodBtns: document.querySelectorAll('[data-bulk-method]'),
 
     // Shell
     shellStatus: document.getElementById('shellStatus'),
@@ -590,13 +583,12 @@ async function handleScan() {
     elements.scanBtn.innerHTML = '<span class="loading"></span><span>Scanning...</span>';
 
     state.results = [];
-    const method = state.scanMethod; // 'passive' or 'active'
 
     for (const url of urls) {
-        log(`Scanning: ${url} [${method}]`, 'info');
+        log(`Scanning: ${url}`, 'info');
 
         try {
-            const result = await scanHost(url, method);
+            const result = await scanHost(url);
 
             // Show which command/check was used
             if (result.scanCommand) {
@@ -739,7 +731,7 @@ async function handleBulkScan() {
     elements.bulkResults.innerHTML = '';
     state.bulkResults = [];
 
-    log(`Bulk scanning ${urls.length} URLs [${state.bulkMethod}] (parallel)`, 'info');
+    log(`Bulk scanning ${urls.length} URLs`, 'info');
 
     // Create pending items with index
     urls.forEach((url, index) => {
@@ -752,16 +744,17 @@ async function handleBulkScan() {
         `;
     });
 
-    // Parallel scan function
-    const scanUrl = async (url, index) => {
+    // Scan each URL sequentially (one by one)
+    for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
         const hostname = new URL(url).hostname;
-        const item = elements.bulkResults.querySelector(`[data-index="${index}"]`);
+        const item = elements.bulkResults.querySelector(`[data-index="${i}"]`);
 
         try {
-            const result = await scanHost(url, state.bulkMethod);
+            const result = await scanHost(url);
             const isVulnerable = result.vulnerable;
 
-            state.bulkResults.push({ url, vulnerable: isVulnerable, index });
+            state.bulkResults.push({ url, vulnerable: isVulnerable, index: i });
 
             if (item) {
                 item.className = `bulk-result-item ${isVulnerable ? 'vulnerable' : 'safe'}`;
@@ -773,7 +766,7 @@ async function handleBulkScan() {
 
             log(`${hostname}: ${isVulnerable ? 'VULNERABLE' : 'Safe'}`, isVulnerable ? 'error' : 'success');
         } catch (error) {
-            state.bulkResults.push({ url, vulnerable: false, error: true, index });
+            state.bulkResults.push({ url, vulnerable: false, error: true, index: i });
             if (item) {
                 item.className = 'bulk-result-item safe';
                 item.innerHTML = `
@@ -783,17 +776,6 @@ async function handleBulkScan() {
             }
             log(`${hostname}: Error - ${error.message}`, 'error');
         }
-    };
-
-    // Run scans in parallel with concurrency limit of 5
-    const CONCURRENCY = 5;
-    const chunks = [];
-    for (let i = 0; i < urls.length; i += CONCURRENCY) {
-        chunks.push(urls.slice(i, i + CONCURRENCY).map((url, j) => ({ url, index: i + j })));
-    }
-
-    for (const chunk of chunks) {
-        await Promise.all(chunk.map(({ url, index }) => scanUrl(url, index)));
     }
 
     const vulnCount = state.bulkResults.filter(r => r.vulnerable).length;
@@ -916,34 +898,12 @@ function initEventListeners() {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
     });
 
-    // Scan method toggle
-    elements.toggleBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            elements.toggleBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            state.scanMethod = btn.dataset.method;
-
-            elements.methodHint.textContent = state.scanMethod === 'passive'
-                ? 'Safe check'
-                : 'RCE check';
-        });
-    });
-
     // Action buttons
     elements.scanBtn.addEventListener('click', handleScan);
     elements.execBtn.addEventListener('click', handleExec);
     elements.bulkScanBtn.addEventListener('click', handleBulkScan);
     elements.connectBtn.addEventListener('click', handleShellConnect);
     elements.sendBtn.addEventListener('click', handleShellSend);
-
-    // Bulk method toggle
-    elements.bulkMethodBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            elements.bulkMethodBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            state.bulkMethod = btn.dataset.bulkMethod;
-        });
-    });
 
     // Shell command input
     elements.shellCommand.addEventListener('keypress', (e) => {

