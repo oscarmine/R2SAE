@@ -12,6 +12,8 @@ const state = {
     history: [],
     results: [],
     bulkResults: [],
+    consoleLogs: [], // Store console logs for per-site persistence
+    currentSite: null, // Track current target site
     settings: {
         timeout: 10,
         autoScroll: true
@@ -42,6 +44,7 @@ const elements = {
     bulkUrls: document.getElementById('bulkUrls'),
     bulkScanBtn: document.getElementById('bulkScanBtn'),
     bulkResults: document.getElementById('bulkResults'),
+    clearBulkUrls: document.getElementById('clearBulkUrls'),
 
     // Shell
     shellStatus: document.getElementById('shellStatus'),
@@ -69,6 +72,77 @@ const elements = {
     // Export
     exportOptions: document.querySelectorAll('.export-option')
 };
+
+// ============================================
+// Per-Site State Persistence
+// ============================================
+function getSiteKey(hostname) {
+    return `site_${hostname.replace(/[^a-zA-Z0-9]/g, '_')}`;
+}
+
+async function saveSiteState() {
+    if (!state.currentSite) return;
+
+    const siteData = {
+        mode: state.mode,
+        execCommand: elements.execCommand?.value || '',
+        bulkUrls: elements.bulkUrls?.value || '',
+        consoleLogs: state.consoleLogs.slice(-100), // Keep last 100 logs
+        timestamp: Date.now()
+    };
+
+    try {
+        await browser.storage.local.set({ [getSiteKey(state.currentSite)]: siteData });
+    } catch (e) {
+        console.error('Failed to save site state:', e);
+    }
+}
+
+async function loadSiteState(hostname) {
+    if (!hostname) return;
+
+    state.currentSite = hostname;
+
+    try {
+        const key = getSiteKey(hostname);
+        const data = await browser.storage.local.get(key);
+        const siteData = data[key];
+
+        if (siteData) {
+            // Restore mode/tab
+            if (siteData.mode) {
+                switchTab(siteData.mode);
+            }
+
+            // Restore command input
+            if (siteData.execCommand && elements.execCommand) {
+                elements.execCommand.value = siteData.execCommand;
+            }
+
+            // Restore bulk URLs
+            if (siteData.bulkUrls && elements.bulkUrls) {
+                elements.bulkUrls.value = siteData.bulkUrls;
+            }
+
+            // Restore console logs
+            if (siteData.consoleLogs && siteData.consoleLogs.length > 0) {
+                elements.console.innerHTML = '';
+                state.consoleLogs = siteData.consoleLogs;
+                siteData.consoleLogs.forEach(logEntry => {
+                    const line = document.createElement('div');
+                    line.className = `console-line ${logEntry.type}`;
+                    line.innerHTML = `<span class="prefix">${logEntry.prefix}</span><span>${logEntry.message}</span>`;
+                    elements.console.appendChild(line);
+                });
+                if (state.settings.autoScroll) {
+                    elements.console.scrollTop = elements.console.scrollHeight;
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load site state:', e);
+    }
+}
 
 // ============================================
 // Payload Construction (Ported from react2shell-scanner)
@@ -307,19 +381,34 @@ function log(message, type = 'info') {
         command: '$'
     };
 
+    const prefix = prefixes[type] || '→';
+    const escapedMessage = escapeHtml(message);
+
+    // Store log entry for persistence
+    state.consoleLogs.push({ message: escapedMessage, type, prefix });
+    if (state.consoleLogs.length > 100) {
+        state.consoleLogs.shift(); // Keep only last 100
+    }
+
     const line = document.createElement('div');
     line.className = `console-line ${type}`;
-    line.innerHTML = `<span class="prefix">${prefixes[type] || '→'}</span><span>${escapeHtml(message)}</span>`;
+    line.innerHTML = `<span class="prefix">${prefix}</span><span>${escapedMessage}</span>`;
 
     elements.console.appendChild(line);
 
     if (state.settings.autoScroll) {
         elements.console.scrollTop = elements.console.scrollHeight;
     }
+
+    // Debounced save (save after activity settles)
+    clearTimeout(state.saveTimeout);
+    state.saveTimeout = setTimeout(() => saveSiteState(), 500);
 }
 
 function clearConsole() {
     elements.console.innerHTML = '';
+    state.consoleLogs = [];
+    saveSiteState();
     log('Console cleared', 'info');
 }
 
@@ -542,11 +631,19 @@ async function autoFillCurrentTab() {
     try {
         const url = await getCurrentTabUrl();
         if (url) {
+            const hostname = new URL(url).hostname;
             elements.targetUrls.value = url;
             if (elements.targetUrlDisplay) {
                 elements.targetUrlDisplay.textContent = url;
             }
-            log(`Target: ${new URL(url).hostname}`, 'info');
+
+            // Load saved state for this site
+            await loadSiteState(hostname);
+
+            // Only log target if we didn't restore logs (avoids duplicate)
+            if (state.consoleLogs.length === 0) {
+                log(`Target: ${hostname}`, 'info');
+            }
         } else {
             if (elements.targetUrlDisplay) {
                 elements.targetUrlDisplay.textContent = 'No valid URL detected';
@@ -732,9 +829,9 @@ async function handleBulkScan() {
     elements.bulkResults.innerHTML = '';
     state.bulkResults = [];
 
-    log(`Bulk scanning ${urls.length} URLs`, 'info');
+    log(`Bulk scanning ${urls.length} URLs (background)`, 'info');
 
-    // Create pending items with index
+    // Create pending items
     urls.forEach((url, index) => {
         const hostname = new URL(url).hostname;
         elements.bulkResults.innerHTML += `
@@ -745,71 +842,130 @@ async function handleBulkScan() {
         `;
     });
 
-    // Scan each URL sequentially (one by one)
-    for (let i = 0; i < urls.length; i++) {
-        const url = urls[i];
-        const hostname = new URL(url).hostname;
-        const item = elements.bulkResults.querySelector(`[data-index="${i}"]`);
+    // Start bulk scan in background
+    await browser.runtime.sendMessage({
+        type: 'startBulkScan',
+        targets: urls,
+        site: state.currentSite
+    });
 
-        try {
-            const result = await scanHost(url);
-            const isVulnerable = result.vulnerable;
-            const isServerDown = result.serverDown;
+    // Poll for updates
+    pollBulkScanStatus();
+}
 
-            state.bulkResults.push({ url, vulnerable: isVulnerable, serverDown: isServerDown, index: i });
+// Poll for bulk scan status from background
+async function pollBulkScanStatus() {
+    const status = await browser.runtime.sendMessage({ type: 'getBulkScanStatus' });
 
-            if (item) {
-                let statusClass, icon;
-                if (isServerDown) {
-                    statusClass = 'down';
-                    icon = '!';
-                } else if (isVulnerable) {
-                    statusClass = 'vulnerable';
-                    icon = '!';
-                } else {
-                    statusClass = 'safe';
-                    icon = '✓';
-                }
+    // Update UI with results
+    status.results.forEach(result => {
+        const item = elements.bulkResults.querySelector(`[data-index="${result.index}"]`);
+        if (item && !item.classList.contains('processed')) {
+            const hostname = new URL(result.url).hostname;
+            let statusClass, icon;
 
-                item.className = `bulk-result-item ${statusClass}`;
-                item.innerHTML = `
-                    <span class="status-icon ${statusClass}">${icon}</span>
-                    <span class="url">${escapeHtml(hostname)}</span>
-                `;
-            }
-
-            if (isServerDown) {
-                log(`${hostname}: SERVER DOWN`, 'warning');
+            if (result.serverDown) {
+                statusClass = 'down';
+                icon = '!';
+            } else if (result.vulnerable) {
+                statusClass = 'vulnerable';
+                icon = '!';
             } else {
-                log(`${hostname}: ${isVulnerable ? 'VULNERABLE' : 'Safe'}`, isVulnerable ? 'error' : 'success');
+                statusClass = 'safe';
+                icon = '✓';
             }
-        } catch (error) {
-            state.bulkResults.push({ url, vulnerable: false, error: true, index: i });
-            if (item) {
-                item.className = 'bulk-result-item safe';
-                item.innerHTML = `
-                    <span class="status-icon safe">✓</span>
-                    <span class="url">${escapeHtml(hostname)}</span>
-                `;
-            }
-            log(`${hostname}: Error - ${error.message}`, 'error');
-        }
 
-        // Small delay between scans to prevent race conditions
-        await new Promise(resolve => setTimeout(resolve, 300));
+            item.className = `bulk-result-item ${statusClass} processed`;
+            item.innerHTML = `
+                <span class="status-icon ${statusClass}">${icon}</span>
+                <span class="url">${escapeHtml(hostname)}</span>
+            `;
+
+            // Log result
+            if (result.serverDown) {
+                log(`${hostname}: SERVER DOWN`, 'warning');
+            } else if (result.vulnerable) {
+                log(`${hostname}: VULNERABLE`, 'error');
+            } else {
+                log(`${hostname}: Safe`, 'success');
+            }
+
+            state.bulkResults.push(result);
+        }
+    });
+
+    // Continue polling or finish
+    if (status.isRunning) {
+        setTimeout(pollBulkScanStatus, 500);
+    } else {
+        // Scan complete
+        const vulnCount = status.results.filter(r => r.vulnerable).length;
+        log(`Bulk scan complete: ${vulnCount}/${status.total} vulnerable`, vulnCount > 0 ? 'warning' : 'success');
+
+        elements.bulkScanBtn.disabled = false;
+        elements.bulkScanBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.35-4.35" />
+            </svg>
+            <span>Scan All</span>
+        `;
+    }
+}
+
+// Restore bulk scan state on popup open
+async function restoreBulkScanState() {
+    const status = await browser.runtime.sendMessage({ type: 'getBulkScanStatus' });
+
+    if (status.targets.length === 0) return;
+
+    // If bulk scan was for a different site, clear it
+    if (status.site && status.site !== state.currentSite) {
+        await browser.runtime.sendMessage({ type: 'clearBulkScan' });
+        log('Previous bulk scan cleared (different site)', 'info');
+        return;
     }
 
-    const vulnCount = state.bulkResults.filter(r => r.vulnerable).length;
-    log(`Bulk scan complete: ${vulnCount}/${urls.length} vulnerable`, vulnCount > 0 ? 'warning' : 'success');
+    // Restore UI
+    elements.bulkResults.innerHTML = '';
+    status.targets.forEach((url, index) => {
+        const hostname = new URL(url).hostname;
+        const result = status.results.find(r => r.index === index);
 
-    elements.bulkScanBtn.disabled = false;
-    elements.bulkScanBtn.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-        </svg>
-        <span>Scan All</span>
-    `;
+        let statusClass = 'pending', icon = '•';
+        if (result) {
+            if (result.serverDown) {
+                statusClass = 'down';
+                icon = '!';
+            } else if (result.vulnerable) {
+                statusClass = 'vulnerable';
+                icon = '!';
+            } else {
+                statusClass = 'safe';
+                icon = '✓';
+            }
+        }
+
+        elements.bulkResults.innerHTML += `
+            <div class="bulk-result-item ${statusClass} ${result ? 'processed' : ''}" data-index="${index}">
+                <span class="status-icon ${statusClass}">${icon}</span>
+                <span class="url">${escapeHtml(hostname)}</span>
+            </div>
+        `;
+    });
+
+    state.bulkResults = status.results;
+
+    // If still running, continue polling
+    if (status.isRunning) {
+        elements.bulkScanBtn.disabled = true;
+        elements.bulkScanBtn.innerHTML = '<span class="loading"></span><span>Scanning...</span>';
+        log(`Resuming: ${status.completed}/${status.total} scanned`, 'info');
+        pollBulkScanStatus();
+    } else if (status.results.length > 0) {
+        const vulnCount = status.results.filter(r => r.vulnerable).length;
+        log(`Previous scan: ${vulnCount}/${status.total} vulnerable`, 'info');
+    }
 }
 
 
@@ -908,6 +1064,9 @@ function switchTab(tabName) {
     document.getElementById('execContent').classList.toggle('active', tabName === 'exec');
     document.getElementById('bulkContent').classList.toggle('active', tabName === 'bulk');
     document.getElementById('shellContent').classList.toggle('active', tabName === 'shell');
+
+    // Save state when tab changes
+    saveSiteState();
 }
 
 // ============================================
@@ -934,6 +1093,27 @@ function initEventListeners() {
     // Execute command input (Enter)
     elements.execCommand.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handleExec();
+    });
+
+    // Save state on input changes (debounced)
+    elements.execCommand.addEventListener('input', () => {
+        clearTimeout(state.inputSaveTimeout);
+        state.inputSaveTimeout = setTimeout(() => saveSiteState(), 1000);
+    });
+
+    elements.bulkUrls.addEventListener('input', () => {
+        clearTimeout(state.inputSaveTimeout);
+        state.inputSaveTimeout = setTimeout(() => saveSiteState(), 1000);
+    });
+
+    // Clear bulk URLs button
+    elements.clearBulkUrls.addEventListener('click', async () => {
+        elements.bulkUrls.value = '';
+        elements.bulkResults.innerHTML = '';
+        state.bulkResults = [];
+        await browser.runtime.sendMessage({ type: 'clearBulkScan' });
+        saveSiteState();
+        log('Bulk URLs cleared', 'info');
     });
 
 
@@ -1001,6 +1181,9 @@ async function init() {
 
     // Auto-fill with current tab URL
     await autoFillCurrentTab();
+
+    // Restore any running bulk scan
+    await restoreBulkScanState();
 
     log('R2SAE Browser Extension ready', 'success');
 }

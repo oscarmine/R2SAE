@@ -119,13 +119,24 @@
                         placeholder="https://example1.com&#10;https://example2.com&#10;https://example3.com"
                         rows="6"></textarea>
                 </div>
-                <button class="action-btn primary" id="bulkScanBtn">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="11" cy="11" r="8" />
-                        <path d="m21 21-4.35-4.35" />
-                    </svg>
-                    <span>Scan All</span>
-                </button>
+                <div class="bulk-buttons">
+                    <button class="action-btn primary" id="bulkScanBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="11" cy="11" r="8" />
+                            <path d="m21 21-4.35-4.35" />
+                        </svg>
+                        <span>Scan All</span>
+                    </button>
+                    <button class="action-btn secondary" id="clearBulkUrls">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                        <span>Clear</span>
+                    </button>
+                </div>
                 <div class="bulk-results" id="bulkResults">
                     <!-- Results will be populated here -->
                 </div>

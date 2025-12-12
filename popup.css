@@ -235,6 +235,44 @@ body {
     color: var(--text-secondary);
 }
 
+.label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.bulk-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.bulk-buttons .action-btn {
+    flex: 1;
+}
+
+.clear-btn {
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text-primary) !important;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    display: flex !important;
+    visibility: visible !important;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    transition: all 0.2s ease;
+}
+
+.clear-btn:hover {
+    color: var(--error) !important;
+    border-color: var(--error) !important;
+    background: rgba(248, 81, 73, 0.2) !important;
+}
+
 .input-wrapper {
     position: relative;
     display: flex;
