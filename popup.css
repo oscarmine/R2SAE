@@ -628,6 +628,16 @@ body {
     color: white;
 }
 
+.bulk-result-item .status-icon.down {
+    background: var(--warning);
+    color: #000;
+    line-height: 16px;
+}
+
+.bulk-result-item.down .url {
+    color: var(--warning);
+}
+
 .bulk-result-item .url {
     flex: 1;
     overflow: hidden;

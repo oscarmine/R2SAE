@@ -260,13 +260,16 @@ async function scanHost(url) {
 
         return {
             vulnerable: result.vulnerable || false,
+            serverDown: result.serverDown || false,
             output: result.output || null,
             error: result.error,
-            scanCommand: result.scanCommand
+            scanCommand: result.scanCommand,
+            status: result.status
         };
     } catch (e) {
         return {
             vulnerable: false,
+            serverDown: false,
             output: null,
             error: e.message
         };
@@ -594,10 +597,13 @@ async function handleScan() {
             state.results.push({
                 url,
                 vulnerable: result.vulnerable,
+                serverDown: result.serverDown,
                 output: result.output
             });
 
-            if (result.vulnerable) {
+            if (result.serverDown) {
+                log('SERVER DOWN', 'warning');
+            } else if (result.vulnerable) {
                 log('VULNERABLE', 'error');
                 if (result.output) {
                     log(`Output: ${result.output}`, 'output');
@@ -676,11 +682,11 @@ async function handleExec() {
             });
 
             if (result.success && result.output) {
-                log(`${url}: ${result.output}`, 'output');
+                log(result.output, 'output');
             } else if (result.success) {
-                log(`${url}: Command executed`, 'success');
+                log('Command executed', 'success');
             } else {
-                log(`${url}: ${result.error || 'Failed'}`, 'error');
+                log(`${result.error || 'Failed'}`, 'error');
             }
 
         } catch (error) {
@@ -748,18 +754,35 @@ async function handleBulkScan() {
         try {
             const result = await scanHost(url);
             const isVulnerable = result.vulnerable;
+            const isServerDown = result.serverDown;
 
-            state.bulkResults.push({ url, vulnerable: isVulnerable, index: i });
+            state.bulkResults.push({ url, vulnerable: isVulnerable, serverDown: isServerDown, index: i });
 
             if (item) {
-                item.className = `bulk-result-item ${isVulnerable ? 'vulnerable' : 'safe'}`;
+                let statusClass, icon;
+                if (isServerDown) {
+                    statusClass = 'down';
+                    icon = '!';
+                } else if (isVulnerable) {
+                    statusClass = 'vulnerable';
+                    icon = '!';
+                } else {
+                    statusClass = 'safe';
+                    icon = '✓';
+                }
+
+                item.className = `bulk-result-item ${statusClass}`;
                 item.innerHTML = `
-                    <span class="status-icon ${isVulnerable ? 'vulnerable' : 'safe'}">${isVulnerable ? '!' : '✓'}</span>
+                    <span class="status-icon ${statusClass}">${icon}</span>
                     <span class="url">${escapeHtml(hostname)}</span>
                 `;
             }
 
-            log(`${hostname}: ${isVulnerable ? 'VULNERABLE' : 'Safe'}`, isVulnerable ? 'error' : 'success');
+            if (isServerDown) {
+                log(`${hostname}: SERVER DOWN`, 'warning');
+            } else {
+                log(`${hostname}: ${isVulnerable ? 'VULNERABLE' : 'Safe'}`, isVulnerable ? 'error' : 'success');
+            }
         } catch (error) {
             state.bulkResults.push({ url, vulnerable: false, error: true, index: i });
             if (item) {
@@ -771,6 +794,9 @@ async function handleBulkScan() {
             }
             log(`${hostname}: Error - ${error.message}`, 'error');
         }
+
+        // Small delay between scans to prevent race conditions
+        await new Promise(resolve => setTimeout(resolve, 300));
     }
 
     const vulnCount = state.bulkResults.filter(r => r.vulnerable).length;
